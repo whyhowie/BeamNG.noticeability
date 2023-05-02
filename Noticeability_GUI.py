@@ -1,6 +1,8 @@
 
 import PySimpleGUI as sg
 import keyboard
+import pygame
+import numpy as np
 import random
 import time
 from beamngpy import BeamNGpy, Scenario, Vehicle, set_up_simple_logging
@@ -8,8 +10,8 @@ from beamngpy.sensors import (
     IMU, Camera, Damage, Electrics, Lidar, State, Timer, Ultrasonic)
 import matplotlib.pyplot as plt
 
+# https://github.com/BeamNG/BeamNGpy/blob/master/examples/feature_overview.ipynb
 # beamng = BeamNGpy('localhost', 64256, home='D:/BeamNG/BeamNG.tech.v0.28.1.0', user='BeamNGpy')
-
 # bng = BeamNGpy('localhost', 64256, home='D:/BeamNG/BeamNG.tech.v0.28.1.0', user='BeamNGpy')
 
 # is_beamng_running = False
@@ -58,12 +60,19 @@ def run_scenario():
         # Add it to our scenario at this position and rotation
         scenario.add_vehicle(vehicle, pos=(-724, 100, 118), rot_quat=(0, 0, 0.3826834, 0.9238795))
         
-
+    
         # Place files defining our scenario for the simulator to read
         scenario.make(bng)
 
         # Load and start our scenario
         bng.scenario.load(scenario) 
+
+        # Find waypoints and print them
+        waypoints = scenario.find_waypoints() # get a list of locations from the simulation
+        waypoints = {w.name: w for w in waypoints}
+        # print(waypoints)
+
+
         bng.scenario.start() # Blocking until loaded
         return True
     except Exception as e: 
@@ -72,6 +81,12 @@ def run_scenario():
 
 
 def add_traffic():
+    try:
+        bng.display_gui_message('Adding traffic')
+        bng.traffic.spawn(max_amount=10)
+        print("Traffic Spawned")
+    except Exception as e:
+        print(e)
     return
 
 def end_scenario():
@@ -95,8 +110,8 @@ def ai_driving(vehicle_id):
     try:
         vehicle = bng.scenario.get_vehicle(vehicle_id)
         vehicle.ai.drive_in_lane(True)
-        vehicle.ai.set_aggression(0.1)
-        vehicle.ai.set_mode('span')
+        vehicle.ai.set_aggression(0.2)
+        vehicle.ai.set_mode('traffic') # although not documented, 'traffic' seems more reasonable
         bng.display_gui_message('Autonomous Driving')
     except Exception as e: 
         print(e)
@@ -111,15 +126,36 @@ def manual_driving(vehicle_id):
 
 
 ################### Noticeability Test ######################
+noticed_flag = False
+pygame.init()
+volume = 0.001
+notification_sound = pygame.mixer.Sound("assets/mixkit-interface-hint-notification-911.wav")
+
+def play_sound():
+    global noticed_flag, volume
+    while noticed_flag == False:
+        notification_sound.set_volume(volume)
+        notification_sound.play()
+        print("Sound played at volume %.3f" % (volume))
+        time.sleep(2)   # wait for 2 seconds
+
+        volume = np.clip(volume + 0.001, 0, 1)  # update volume
+        continue
+    print("Playing stopped.")
+    volume = 0.001
+    noticed_flag = False
+
 
 def signal_noticed():
+    global noticed_flag
+    noticed_flag = True
     print("Signal Noticed!")
 
 # Callback function when "-" key is pressed, showing signal noticed by user
 keyboard.add_hotkey('-', signal_noticed)
 
 
-
+ 
 ################### Make GUI ################################
 
 launch_frame = sg.Frame('Launch', [[sg.Button('Launch BeamNG!', key='-launch-')]])
@@ -128,14 +164,19 @@ scenario_frame = sg.Frame('Scenario', [[sg.Button('Run Scenario', key='-scenario
                 [sg.Button('Add Traffic', key='-traffic-', disabled=True)]])
 driving_frame = sg.Frame('Driving Mode',[[sg.Radio('AI', 'drive-mode', key='-auto-driving-', enable_events=True, disabled=True)],
             [sg.Radio('Manual', 'drive-mode', key='-manual-driving-', enable_events=True, default=True, disabled=True)]])
+signal_frame = sg.Frame('Signal Detection Test', [[sg.Button('Audio Test', key='-audio-test-', disabled=False)]])
+
+
+
 layout = [[sg.Text('')],
-          [launch_frame, scenario_frame, driving_frame],
+          [launch_frame, scenario_frame, driving_frame, signal_frame],
           [],          
           [sg.Button('Dummy Button'), sg.Button('Get Position', key='-position-'), sg.Exit()]]      
 
 
 font = (16)
-window = sg.Window('BeamNG.tech Noticeability Test', layout, size=(500, 250), font=font)      
+window = sg.Window('BeamNG.tech Noticeability Test', layout, size=(800, 250), font=font,
+    element_justification='c')      
 
 
 ########### Helper GUI Functions ########
@@ -143,10 +184,15 @@ window = sg.Window('BeamNG.tech Noticeability Test', layout, size=(500, 250), fo
 def enable_options():
     window['-auto-driving-'].update(disabled=False)
     window['-manual-driving-'].update(disabled=False)
+    window['-traffic-'].update(disabled=False)
 
 def disable_options():
     window['-auto-driving-'].update(disabled=True)
     window['-manual-driving-'].update(disabled=True)
+    window['-traffic-'].update(disabled=True)
+
+# Enable noticeability test controls
+
 #######################################
 
 
@@ -169,6 +215,10 @@ while True:                             # The Event Loop
         window['-end-scenario-'].update(disabled=False)
         window['-scenario-'].update(disabled=False)
         disable_options()
+
+    if event == '-traffic-':
+        add_traffic()
+
     if event == '-position-':
         try:
             print(get_vehicle_status('ego_vehicle'), get_vehicle_status('ego_vehicle').state)
@@ -179,12 +229,21 @@ while True:                             # The Event Loop
         print('======Autonomous driving======')
         ai_driving('ego_vehicle')
     if event == '-manual-driving-' and values['-manual-driving-']==True:
-        print('======Manual driving======')
+        print('=======Manual driving=========')
         manual_driving('ego_vehicle')
+
+    if event == '-audio-test-':
+        window['-audio-test-'].update(disabled=True)
+        print("Playing sound")
+        window.perform_long_operation(play_sound, "-sound-stopped-")
+    if event == '-sound-stopped-':
+        print('All good!')
+        window['-audio-test-'].update(disabled=False)
+
 
 window.close()
 bng.close() # Terminate simulator
-
+pygame.quit() # Quit PyGame
 
 
 
