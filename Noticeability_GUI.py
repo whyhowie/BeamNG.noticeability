@@ -54,13 +54,14 @@ def run_scenario():
     print('Starting a scenario!')
     try:
         # Create a scenario in west_coast_usa called 'Example'
-        # scenario_options = dict({'description':'Hello! xxxxxx'})
-        scenario = Scenario('west_coast_usa', 'Example')
-        # Create an ETK800 with the licence plate 'PYTHON'
-        vehicle = Vehicle('ego_vehicle', model='etk800', license='NOTICE', )
+
+        scenario = Scenario('west_coast_usa', 'Example', description='Hello!!!!!')
+        # Create an ETK800 with the licence plate
+        vehicle = Vehicle('ego_vehicle', model='etk800', \
+            part_config='vehicles/etk800/Etk856tx_A_adas.pc')
         # Add it to our scenario at this position and rotation
         # scenario.add_vehicle(vehicle, pos=(-724, 100, 118), rot_quat=(0, 0, 0.3826834, 0.9238795))
-        scenario.add_vehicle(vehicle, pos=(-195, -787, 134), rot_quat=(0, 0, 0.3826834, 0.9238795))
+        scenario.add_vehicle(vehicle, pos=(-195, -787, 134), cling=True, rot_quat=(-0.07, -0.07, -0.46, 0.88))
 
     
         # Place files defining our scenario for the simulator to read
@@ -70,12 +71,28 @@ def run_scenario():
         bng.scenario.load(scenario) 
 
         # Find waypoints and print them
-        waypoints = scenario.find_waypoints() # get a list of locations from the simulation
-        waypoints = {w.name: w for w in waypoints}
+        # waypoints = scenario.find_waypoints() # get a list of locations from the simulation
+        # waypoints = {w.name: w for w in waypoints}
         # print(waypoints)
 
+        # Initialize electrics sensor
+        electrics = Electrics()
 
-        bng.scenario.start() # Blocking until loaded
+
+        # Run through this whole thing to make sure we have gps in the vehicle
+        # Basically respawning the vehicle
+        bng.vehicles.despawn(vehicle)
+        bng.vehicles.spawn(vehicle, pos=(-195, -787, 134), rot_quat=(-0.07, -0.07, -0.46, 0.88))
+        # bng.vehicles.await_spawn('ego_vehicle')
+        ego_vehicle = bng.scenario.get_vehicle('ego_vehicle')
+        ego_vehicle.set_license_plate('NOTICE')
+        ego_vehicle.sensors.attach('electrics', electrics)
+    
+        # bng.scenario.start()
+        ego_vehicle.switch()
+        
+
+
         return True
     except Exception as e: 
         print(e)
@@ -102,29 +119,52 @@ def end_scenario():
 def get_vehicle_status(vehicle_id):
     try:
         vehicle = bng.scenario.get_vehicle(vehicle_id)
+        print('steering sensor info:')
         vehicle.sensors.poll()
+        print(f"Steering angle: {vehicle.sensors['electrics']['steering']} \n" + 
+            f"Steering input: {vehicle.sensors['electrics']['steering_input']}")
         return vehicle
     except Exception as e: 
         print(e)
         return None
 
+def get_vehicle_config(vehicle_id):
+    try:
+        vehicle = bng.scenario.get_vehicle(vehicle_id)
+        print('part config:')
+        print(vehicle.get_part_config())
+        return vehicle
+    except Exception as e: 
+        print(e)
+        return None
+
+driving_mode = ''
+
 def ai_driving(vehicle_id):
+    global driving_mode
     try:
         vehicle = bng.scenario.get_vehicle(vehicle_id)
         vehicle.ai.drive_in_lane(True)
         vehicle.ai.set_aggression(0.2)
         vehicle.ai.set_mode('traffic') # although not documented, 'traffic' seems more reasonable
+        # vehicle.ai.set_mode('span') # not following traffic rules
         bng.display_gui_message('Autonomous Driving')
+        driving_mode = 'autonomous'
     except Exception as e: 
+        print("Failed to switch driving mode.")
         print(e)
 
 def manual_driving(vehicle_id):
+    global driving_mode
     try:
         vehicle = bng.scenario.get_vehicle(vehicle_id)
         vehicle.ai.set_mode('disabled')
         bng.display_gui_message('Manual Driving')
-    except Exception as e: 
+        driving_mode = 'manual'
+    except Exception as e:
+        print("Failed to switch driving mode.")
         print(e)
+
 
 
 ################### Noticeability Test ######################
@@ -162,8 +202,8 @@ launch_frame = sg.Frame('Launch', [[sg.Button('Launch BeamNG!', key='-launch-', 
 scenario_frame = sg.Frame('Scenario', [[sg.Button('Run Scenario', key='-scenario-', disabled=False)],
                 [sg.Button('End Scenario', key='-end-scenario-', disabled=False)],
                 [sg.Button('Add Traffic', key='-traffic-', disabled=True)]])
-driving_frame = sg.Frame('Driving Mode',[[sg.Radio('AI', 'drive-mode', key='-auto-driving-', enable_events=True, disabled=True)],
-            [sg.Radio('Manual', 'drive-mode', key='-manual-driving-', enable_events=True, default=True, disabled=True)]])
+driving_frame = sg.Frame('Driving Mode',[[sg.Radio('AI', 'drive-mode', key='-auto-driving-', enable_events=True, disabled=False)],
+            [sg.Radio('Manual', 'drive-mode', key='-manual-driving-', enable_events=True, disabled=False)]])
 signal_frame = sg.Frame('Signal Detection Test', [[sg.Button('Audio Test (=)', key='-audio-test-', button_color = 'red', disabled=False)],
                 [sg.Text('Audio Test Not running', key='-audio-test-text-')]])
 
@@ -173,7 +213,9 @@ layout = [[sg.Text('')],
           [launch_frame, scenario_frame, driving_frame, signal_frame],
           [],
           [sg.HorizontalSeparator()],          
-          [sg.Button('Dummy Button'), sg.Button('Get Position', key='-position-'), sg.Exit()]]      
+          [sg.Button('Dummy Button'), sg.Button('Get Status', key='-status-'), 
+          sg.Button('Get Vehicle Config', key='-vehicle-config-'),
+          sg.Button('Get Game State', key='-game-state-'), sg.Exit()]]      
 
 
 font = (16)
@@ -194,6 +236,26 @@ def disable_options():
     window['-traffic-'].update(disabled=True)
 
 
+def update_based_on_state():
+    # current_state = bng.get_gamestate()
+    # print(current_state)
+    try:
+        if bng.get_gamestate()['state'] == 'scenario':    
+            enable_options()
+            return
+        else:
+            disable_options()
+    except:
+        disable_options()
+        pass
+
+def update_driving_mode_radio(mode):
+    if mode == 'autonomous':
+        window['-auto-driving-'].update(value=True)
+    if mode == 'manual':
+        window['-manual-driving-'].update(value=True)
+
+
 ########### Key Binding using keyboard ##########
 # Callback function when "=" key is pressed, starting audio test
 keyboard.add_hotkey('=', lambda: window['-audio-test-'].click())
@@ -208,23 +270,30 @@ keyboard.add_hotkey('-', signal_noticed)
 steering_wheel = pygame.joystick.Joystick(0)
 steering_wheel.init()
 
-driving_mode = ''
+# Use Button 22 to change driving mode ("return" button on steering wheel)
+# This first trigger GUI events. then the game will make the switch accordingly
+
 driving_mode_button_pressed = False
 
-def drive_mode_button():
+def driving_mode_button():
     global driving_mode, driving_mode_button_pressed
     pygame_events = pygame.event.get()
     for event in pygame_events:
         if pygame.event.event_name(event.type) == 'JoyButtonUp' \
             and event.button == 22:
-            print('Switch driving mode')
             driving_mode_button_pressed = True
-            if driving_mode == 'manual':
-                driving_mode = 'autonomous'
-                window['-auto-driving-'].Update(value=True)
-            else:
-                driving_mode = 'manual'
+            
+            if driving_mode == 'autonomous':
+                # driving_mode = 'manual'
+                print(f'Button pressed, switching driving mode to {driving_mode}')
                 window['-manual-driving-'].Update(value=True)
+                window.write_event_value('-manual-driving-', True)
+            else:
+                # driving_mode = 'autonomous'
+                print(f'Button pressed, witching driving mode to {driving_mode}')
+                window['-auto-driving-'].Update(value=True)
+                window.write_event_value('-auto-driving-', True)
+
 
 
 
@@ -235,7 +304,11 @@ if __name__ == "__main__":
     while True:                             # The Event Loop
         event, values = window.read(timeout=100) 
 
-        drive_mode_button() # change driving mode
+
+        update_based_on_state() # update GUI options based on state
+        
+        driving_mode_button() # change driving mode using pygame
+
             
         if event == sg.WIN_CLOSED or event == 'Exit':
             break      
@@ -254,24 +327,48 @@ if __name__ == "__main__":
 
         if event == '-traffic-':
             add_traffic()
+            window['-traffic-'].update(disabled=True)
 
-        if event == '-position-':
+
+
+        # Debug buttons
+        if event == '-status-':
             try:
-                print(get_vehicle_status('ego_vehicle'), get_vehicle_status('ego_vehicle').state)
+                print(get_vehicle_status('ego_vehicle'))
+            except Exception as e:
+                print(e)
+        if event == '-vehicle-config-':
+            try:
+                print(get_vehicle_config('ego_vehicle'))
+            except Exception as e:
+                print(e)
+        if event == '-game-state-':
+            try:
+                update_based_on_state()
             except Exception as e:
                 print(e)
 
-        if (event == '-auto-driving-' or driving_mode_button_pressed == True)\
-            and values['-auto-driving-']==True:
+
+
+
+        # driving mode radio buttons
+        if (event == '-auto-driving-') or (driving_mode_button_pressed == True\
+            and values['-auto-driving-']==True):
             driving_mode_button_pressed = False
             print('======Autonomous driving======')
             ai_driving('ego_vehicle')
-        if (event == '-manual-driving-' or driving_mode_button_pressed == True)\
-            and values['-manual-driving-']==True:
+            update_driving_mode_radio(driving_mode) # In case mode switch fails
+            # driving_mode = 'autonomous'
+        if (event == '-manual-driving-') or (driving_mode_button_pressed == True\
+            and values['-manual-driving-']==True):
             driving_mode_button_pressed = False
             print('=======Manual driving=========')
             manual_driving('ego_vehicle')
+            update_driving_mode_radio(driving_mode) # In case mode switch fails
+            # driving_mode = 'manual'
 
+
+        # Audio test
         if event == '-audio-test-':
             window['-audio-test-'].update(disabled=True)
             window['-audio-test-text-'].update(value='Audio Test Running')
