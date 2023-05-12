@@ -55,6 +55,7 @@ if __name__ == "__main__":
     while True:
         while data_logging:
             ego_vehicle.sensors.poll()
-            print(ego_vehicle.sensors['electrics']['steering_input'])
-    
+            print(f"{ego_vehicle.sensors['electrics']['steering_input']}" + 
+                  f" at {ego_vehicle.sensors['electrics']['steering']} degrees")
+
         continue
