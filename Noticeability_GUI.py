@@ -57,8 +57,9 @@ def run_scenario():
 
         scenario = Scenario('west_coast_usa', 'Example', description='Hello!!!!!')
         # Create an ETK800 with the licence plate
-        vehicle = Vehicle('ego_vehicle', model='etk800', \
-            part_config='vehicles/etk800/Etk856tx_A_adas.pc')
+        vehicle = Vehicle('ego_vehicle', model='etk800')
+        # vehicle = Vehicle('ego_vehicle', model='etk800', \
+        #     part_config='vehicles/etk800/Etk856tx_A_adas.pc')
         # Add it to our scenario at this position and rotation
         # scenario.add_vehicle(vehicle, pos=(-724, 100, 118), rot_quat=(0, 0, 0.3826834, 0.9238795))
         scenario.add_vehicle(vehicle, pos=(-195, -787, 134), cling=True, rot_quat=(-0.07, -0.07, -0.46, 0.88))
@@ -169,7 +170,7 @@ def manual_driving(vehicle_id):
 
 ################### Noticeability Test ######################
 noticed_flag = False
-pygame.init()
+pygame.init()   # Use pygame to play sound
 volume = 0.001
 notification_sound = pygame.mixer.Sound("assets/mixkit-interface-hint-notification-911.wav")
 
@@ -267,8 +268,9 @@ keyboard.add_hotkey('-', signal_noticed)
 
 
 #################### steering wheel buttons ###############
-steering_wheel = pygame.joystick.Joystick(0)
-steering_wheel.init()
+SW_NUM = 1  # Steering wheel device number
+# steering_wheel = pygame.joystick.Joystick(SW_NUM)
+# steering_wheel.init()
 
 # Use Button 22 to change driving mode ("return" button on steering wheel)
 # This first trigger GUI events. then the game will make the switch accordingly
@@ -277,22 +279,23 @@ driving_mode_button_pressed = False
 
 def driving_mode_button():
     global driving_mode, driving_mode_button_pressed
-    pygame_events = pygame.event.get()
-    for event in pygame_events:
-        if pygame.event.event_name(event.type) == 'JoyButtonUp' \
-            and event.button == 22:
-            driving_mode_button_pressed = True
+    # pygame_events = pygame.event.get()
+    # for event in pygame_events:
+    #     if pygame.event.event_name(event.type) == 'JoyButtonUp' \
+    #         and event.button == 22:
+    #         driving_mode_button_pressed = True
+    #         print('Button 22 pressed.')
             
-            if driving_mode == 'autonomous':
-                # driving_mode = 'manual'
-                print(f'Button pressed, switching driving mode to {driving_mode}')
-                window['-manual-driving-'].Update(value=True)
-                window.write_event_value('-manual-driving-', True)
-            else:
-                # driving_mode = 'autonomous'
-                print(f'Button pressed, witching driving mode to {driving_mode}')
-                window['-auto-driving-'].Update(value=True)
-                window.write_event_value('-auto-driving-', True)
+            # if driving_mode == 'autonomous':
+            #     # driving_mode = 'manual'
+            #     print(f'Button pressed, switching driving mode to {driving_mode}')
+            #     window['-manual-driving-'].Update(value=True)
+            #     window.write_event_value('-manual-driving-', True)
+            # else:
+            #     # driving_mode = 'autonomous'
+            #     print(f'Button pressed, switching driving mode to {driving_mode}')
+            #     window['-auto-driving-'].Update(value=True)
+            #     window.write_event_value('-auto-driving-', True)
 
 
 

@@ -7,7 +7,7 @@ from PyQt5 import QtGui, QtWidgets, QtCore
 
 import logitech_steering_wheel as lsw
 
-DEVICE_NUM = 1
+DEVICE_NUM = 0
 
 class MyMainwindow(QtWidgets.QMainWindow):
     def __init__(self):
