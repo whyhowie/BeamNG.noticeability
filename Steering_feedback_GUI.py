@@ -9,14 +9,18 @@ import pygetwindow as gw
 
 import time
 
+########### Steering wheel constants
 SW_NUM = 0  # Device number (todo: find device number)
+AV_BUTTON_NUM = 22  # Button 22 for driving mode switching
 SW_READING_RANGE = 31700    # Approximate maximum reading of the steering wheel (sw_state.lX)
 SW_ANGLE_RANGE = 450    # Approximate maximum turning angle of the steering wheel
 
-dt = 0 # Time step
-K_P = .3 # K_p of PID controller
-K_I = .02 # K_i of PID controller
-K_D = .01 # K_d of PID controller
+########### Constants for PID controller ################################
+K_P = .2 # K_p of PID controller
+K_I = .3 # K_i of PID controller
+K_D = .05 # K_d of PID controller
+
+PID_MAX_FORCE = 15
 
 sw_initialized = False #
 
@@ -104,6 +108,12 @@ def get_sw_angle(device_num):
         return sw_angle
 
 
+def get_sw_button_state(device_num, button_num):
+    if sw_initialized:
+        lsw.update()
+        s = lsw.get_state(device_num)
+
+        return s.rgbButtons[button_num]
 
 
 
@@ -124,10 +134,18 @@ window = sg.Window('Sound Test', layout, size=(800, 300), font=font,
     element_justification='c', finalize=True) 
 
 
+
+
+################# More PID Stuff #############################
+
+
 sw_error = 0
 prev_sw_error = 0
 prev_PID_time = time.time()
 now_PID_time = time.time()
+
+button_down = False
+button_up = False
 
 PID_p = 0
 PID_i = 0
@@ -135,12 +153,14 @@ PID_d = 0
 
 PID_DIR = -1
 
+
+
 if __name__ == "__main__":
     
     try:
         while True:
 
-            ################ Read wheel status #####################
+            ################ Steering wheel feedback output #####################
             if sw_initialized:
                 sw_angle = get_sw_angle(SW_NUM)    # Physical steering wheel angle
                 ego_vehicle.sensors.poll()
@@ -161,20 +181,22 @@ if __name__ == "__main__":
 
                 # PID Integral term
                 PID_i = PID_i + (PID_DIR * K_I * sw_error * time_interval)  # update integral
+                PID_i = max(-80, min(PID_i, 80))   # limit the integral term output to +/-80
 
 
                 # PID Derivative term
-                PID_d = PID_DIR * K_D * (prev_sw_error - sw_error) / time_interval
-                # (notice the subtraction order)
+                PID_d = PID_DIR * K_D * (sw_error - prev_sw_error) / time_interval
+                prev_sw_error = sw_error
 
 
-                # PID control input
-                PID_output = int(PID_p + PID_i + PID_d)
+
+                # PID control input (Clip within range)
+                PID_output = max(-PID_MAX_FORCE, min(int(PID_p + PID_i + PID_d), PID_MAX_FORCE))
 
                 window['-sw-status-'].Update(f"Physical: {round(sw_angle,2)} degrees" + 
                     f", Virtual: {round(steering_angle,2)} degrees, \n" +
                     f"Error: {round(sw_error,2)}, " + 
-                    f"K_p: {round(PID_p, 2)}, K_i: {round(PID_i, 2)}, K_d: {round(PID_d, 2)},\n"
+                    f"P: {round(PID_p, 2)}, I: {round(PID_i, 2)}, D: {round(PID_d, 2)},\n"
                     f"Output: {PID_output}")
 
 
@@ -184,7 +206,17 @@ if __name__ == "__main__":
                     lsw.stop_constant_force(SW_NUM)
 
                 
-
+                ################ Steering wheel button handling ############################
+                # Check if button pressed (button 22 in this case)
+                button_state = get_sw_button_state(SW_NUM, AV_BUTTON_NUM)
+                if button_state != 0:
+                    button_down = True
+                if (button_down == True) and (button_state == 0):
+                    button_up = True
+                    button_down = False
+                if button_up == True:
+                    print(f'Button {AV_BUTTON_NUM} pressed.')
+                    button_up = False
 
 
             ################ The GUI Events ############################################
@@ -201,7 +233,7 @@ if __name__ == "__main__":
                 window.perform_long_operation(lambda: initialize_sw(SW_NUM), "-init-sw-done-")
                 window['-init-sw-'].update(disabled=True)
             if event == '-init-sw-done-':
-                window['-init-sw-'].update(disabled=True)
+                window['-init-sw-'].update(disabled=False)
                 print('All good!')
             if event == '-check-sw-done-':
                 print('Check done!')

@@ -8,7 +8,8 @@ import time
 from beamngpy import BeamNGpy, Scenario, Vehicle, set_up_simple_logging
 from beamngpy.sensors import (
     IMU, Camera, Damage, Electrics, Lidar, State, Timer, Ultrasonic)
-import matplotlib.pyplot as plt
+import logitech_steering_wheel as lsw
+import pygetwindow as gw
 
 # https://github.com/BeamNG/BeamNGpy/blob/master/examples/feature_overview.ipynb
 # beamng = BeamNGpy('localhost', 64256, home='D:/BeamNG/BeamNG.tech.v0.28.1.0', user='BeamNGpy')
@@ -79,6 +80,8 @@ def run_scenario():
         # Initialize electrics sensor
         electrics = Electrics()
 
+        # Set deterministic mode
+        bng.settings.set_deterministic(60)
 
         # Run through this whole thing to make sure we have gps in the vehicle
         # Basically respawning the vehicle
@@ -207,21 +210,228 @@ driving_frame = sg.Frame('Driving Mode',[[sg.Radio('AI', 'drive-mode', key='-aut
             [sg.Radio('Manual', 'drive-mode', key='-manual-driving-', enable_events=True, disabled=False)]])
 signal_frame = sg.Frame('Signal Detection Test', [[sg.Button('Audio Test (=)', key='-audio-test-', button_color = 'red', disabled=False)],
                 [sg.Text('Audio Test Not running', key='-audio-test-text-')]])
-
+steering_frame = sg.Frame('Steering Feedback', [[sg.Button('Initialize steering wheel', key='-init-sw-')],
+          [sg.Button('Check steering wheel', key='-check-sw-')],
+          [sg.Text('------------------------------------------------------------------\n' + 
+                   '------------------------------------------------------------------\n' + 
+                   '------------------------------------------------------------------', key='-sw-status-')],])
 
 
 layout = [[sg.Text('')],
           [launch_frame, scenario_frame, driving_frame, signal_frame],
           [],
-          [sg.HorizontalSeparator()],          
+          [sg.HorizontalSeparator()],
+          [steering_frame],
+          [sg.HorizontalSeparator()],
           [sg.Button('Dummy Button'), sg.Button('Get Status', key='-status-'), 
           sg.Button('Get Vehicle Config', key='-vehicle-config-'),
           sg.Button('Get Game State', key='-game-state-'), sg.Exit()]]      
 
 
 font = (16)
-window = sg.Window('BeamNG.tech Noticeability Test', layout, size=(800, 250), font=font,
+window = sg.Window('BeamNG.tech Noticeability Test', layout, size=(800, 600), font=font,
     element_justification='c')      
+
+
+
+
+
+########### Key Binding using keyboard ##########
+# Callback function when "=" key is pressed, starting audio test
+keyboard.add_hotkey('=', lambda: window['-audio-test-'].click())
+
+# Callback function when "-" key is pressed, showing signal noticed by user
+keyboard.add_hotkey('-', signal_noticed)
+
+
+
+########### Steering wheel stuff ###############################################################
+########### Steering wheel constants
+SW_NUM = 0  # Device number (todo: find device number)
+AV_BUTTON_NUM = 22  # Button 22 for driving mode switching
+SW_READING_RANGE = 31700    # Approximate maximum reading of the steering wheel (sw_state.lX)
+SW_ANGLE_RANGE = 450    # Approximate maximum turning angle of the steering wheel
+
+
+sw_initialized = False
+
+
+# Initialize steering wheel
+def initialize_sw(device_num):
+    global sw_initialized
+    
+    try:
+        # w = gw.getWindowsWithTitle('BeamNG.drive - 0')[0]
+        w = gw.getActiveWindow()
+        print(gw.getActiveWindowTitle())
+        print(w)
+        lsw.initialize_with_window(True, w._hWnd)
+
+        print("SDK version is: " + str(lsw.get_sdk_version()))
+
+
+        if lsw.is_connected(device_num):
+            print(f'connected to a steering wheel at index {device_num}')
+        else:
+            print('Connection failed')
+
+        # lsw.update()
+        lsw.get_current_controller_properties(device_num)
+
+        sw_initialized = True
+    except Exception as e:
+        print(e)
+
+
+def get_sw_angle(device_num):
+    if sw_initialized:
+        lsw.update()
+        sw_state = lsw.get_state(device_num)
+        # Find current physical steering wheel angle
+        sw_angle = sw_state.lX / SW_READING_RANGE * SW_ANGLE_RANGE
+        # print(sw_angle)
+        return sw_angle
+
+
+########### Constants for PID controller ################################
+K_P = .2 # K_p of PID controller
+K_I = .3 # K_i of PID controller
+K_D = .05 # K_d of PID controller
+
+PID_MAX_FORCE = 15
+
+################# More PID Stuff #############################
+sw_error = 0
+prev_sw_error = 0
+prev_PID_time = time.time()
+now_PID_time = time.time()
+
+button_down = False
+button_up = False
+
+PID_p = 0
+PID_i = 0
+PID_d = 0
+
+PID_DIR = -1
+
+################ Steering wheel feedback output #####################
+def sw_default_output(device_num=SW_NUM):
+    lsw.play_spring_force(device_num, 0, 20, 80)
+
+def stop_sw_default_output(device_num=SW_NUM):
+    if lsw.is_playing(device_num, lsw.ForceType.SPRING):
+        lsw.stop_spring_force(device_num)
+
+
+def sw_feedback_output(device_num=SW_NUM, vehicle_id="ego_vehicle"):
+    global sw_error, prev_sw_error, prev_PID_time, now_PID_time, PID_p, PID_i, PID_d
+    try:
+        if sw_initialized and bng.get_gamestate()['state'] == 'scenario':
+            
+            sw_angle = get_sw_angle(device_num)    # Physical steering wheel angle
+            
+            # Get virtual steering wheel angle
+            vehicle = bng.scenario.get_vehicle(vehicle_id)
+            vehicle.sensors.poll()
+            # Virtual steering input (*-1 because of opposite to physical wheel)
+            steering_input = -1 * vehicle.sensors['electrics']['steering_input']
+            # Virtual steering wheel angle (*-1 because of direction opposite to physical wheel):
+            steering_angle = -1 * vehicle.sensors['electrics']['steering']   
+            
+            if driving_mode == 'autonomous':
+                stop_sw_default_output(device_num)  # default behavior
+
+                # PID Proportional term
+                sw_error = steering_angle - sw_angle    # find angle difference
+                now_PID_time = time.time()
+                time_interval = (now_PID_time - prev_PID_time)
+                prev_PID_time = now_PID_time    # update prev time for next iteration
+                PID_p = PID_DIR * K_P * sw_error
+
+                # PID Integral term
+                PID_i = PID_i + (PID_DIR * K_I * sw_error * time_interval)  # update integral
+                PID_i = max(-80, min(PID_i, 80))   # limit the integral term output to +/-80
+
+
+                # PID Derivative term
+                PID_d = PID_DIR * K_D * (sw_error - prev_sw_error) / time_interval
+                prev_sw_error = sw_error
+
+
+
+                # PID control input (Clip within range)
+                PID_output = max(-PID_MAX_FORCE, min(int(PID_p + PID_i + PID_d), PID_MAX_FORCE))
+
+                window['-sw-status-'].Update(f"Physical: {round(sw_angle,2)} degrees" + 
+                    f", Virtual: {round(steering_angle,2)} degrees, \n" +
+                    f"Error: {round(sw_error,2)}, " + 
+                    f"P: {round(PID_p, 2)}, I: {round(PID_i, 2)}, D: {round(PID_d, 2)},\n"
+                    f"Output: {PID_output}")
+
+
+                if (abs(sw_error) > 0):  # if physical-virtual difference larger than 0 deg
+                    lsw.play_constant_force(SW_NUM, PID_output)
+                else:
+                    lsw.stop_constant_force(SW_NUM)
+
+            else:   # if not autonomous driving
+                if lsw.is_playing(device_num, lsw.ForceType.CONSTANT):
+                    lsw.stop_constant_force(SW_NUM)
+                sw_default_output(device_num)
+                window['-sw-status-'].Update(f"Physical: ------ degrees" + 
+                    f", Virtual: {round(steering_angle,2)} degrees, \n" +
+                    f"Error: ------, " + 
+                    f"P: ------, I: ------, D: ------,\n"
+                    f"Output: Not in autonomous driving mode!")
+                
+    except Exception as e:
+        print(e)
+
+
+
+
+################ Steering wheel button handling ############################
+#################### steering wheel buttons ###############
+# Not using pygame
+def get_sw_button_state(device_num, button_num):
+    if sw_initialized:
+        lsw.update()
+        s = lsw.get_state(device_num)
+
+        return s.rgbButtons[button_num]
+# Use Button 22 to change driving mode ("return" button on steering wheel)
+# This first trigger GUI events. then the game will make the switch accordingly
+button_down = False
+button_up = False
+driving_mode_button_pressed = False
+
+def driving_mode_button_handler(device_num=SW_NUM, button_num=AV_BUTTON_NUM):
+    global driving_mode, driving_mode_button_pressed, button_down, button_up
+    # Check if button pressed (button 22 in this case)
+    button_state = get_sw_button_state(device_num, button_num)
+    if button_state != 0:
+        button_down = True
+    if (button_down == True) and (button_state == 0):
+        button_up = True
+        button_down = False
+    if button_up == True:
+        driving_mode_button_pressed = True
+        print(f'Button {button_num} pressed.')
+        button_up = False
+        if driving_mode == 'autonomous':
+            # driving_mode = 'manual'
+            print(f'Button pressed, switching driving mode to {driving_mode}')
+            window['-manual-driving-'].Update(value=True)
+            window.write_event_value('-manual-driving-', True)
+        else:
+            # driving_mode = 'autonomous'
+            print(f'Button pressed, switching driving mode to {driving_mode}')
+            window['-auto-driving-'].Update(value=True)
+            window.write_event_value('-auto-driving-', True)
+
+
+
 
 
 ########### Helper GUI Functions ########
@@ -257,45 +467,6 @@ def update_driving_mode_radio(mode):
         window['-manual-driving-'].update(value=True)
 
 
-########### Key Binding using keyboard ##########
-# Callback function when "=" key is pressed, starting audio test
-keyboard.add_hotkey('=', lambda: window['-audio-test-'].click())
-
-# Callback function when "-" key is pressed, showing signal noticed by user
-keyboard.add_hotkey('-', signal_noticed)
-
-
-
-
-#################### steering wheel buttons ###############
-SW_NUM = 1  # Steering wheel device number
-# steering_wheel = pygame.joystick.Joystick(SW_NUM)
-# steering_wheel.init()
-
-# Use Button 22 to change driving mode ("return" button on steering wheel)
-# This first trigger GUI events. then the game will make the switch accordingly
-
-driving_mode_button_pressed = False
-
-def driving_mode_button():
-    global driving_mode, driving_mode_button_pressed
-    # pygame_events = pygame.event.get()
-    # for event in pygame_events:
-    #     if pygame.event.event_name(event.type) == 'JoyButtonUp' \
-    #         and event.button == 22:
-    #         driving_mode_button_pressed = True
-    #         print('Button 22 pressed.')
-            
-            # if driving_mode == 'autonomous':
-            #     # driving_mode = 'manual'
-            #     print(f'Button pressed, switching driving mode to {driving_mode}')
-            #     window['-manual-driving-'].Update(value=True)
-            #     window.write_event_value('-manual-driving-', True)
-            # else:
-            #     # driving_mode = 'autonomous'
-            #     print(f'Button pressed, switching driving mode to {driving_mode}')
-            #     window['-auto-driving-'].Update(value=True)
-            #     window.write_event_value('-auto-driving-', True)
 
 
 
@@ -303,6 +474,7 @@ def driving_mode_button():
 
 ################### main() ####################
 if __name__ == "__main__":
+    
 
     while True:                             # The Event Loop
         event, values = window.read(timeout=100) 
@@ -310,7 +482,9 @@ if __name__ == "__main__":
 
         update_based_on_state() # update GUI options based on state
         
-        driving_mode_button() # change driving mode using pygame
+        if sw_initialized:
+            driving_mode_button_handler() # change driving mode
+            sw_feedback_output()
 
             
         if event == sg.WIN_CLOSED or event == 'Exit':
@@ -361,15 +535,24 @@ if __name__ == "__main__":
             print('======Autonomous driving======')
             ai_driving('ego_vehicle')
             update_driving_mode_radio(driving_mode) # In case mode switch fails
-            # driving_mode = 'autonomous'
         if (event == '-manual-driving-') or (driving_mode_button_pressed == True\
             and values['-manual-driving-']==True):
             driving_mode_button_pressed = False
             print('=======Manual driving=========')
             manual_driving('ego_vehicle')
             update_driving_mode_radio(driving_mode) # In case mode switch fails
-            # driving_mode = 'manual'
 
+
+        # Steering wheel buttons
+        if event == '-check-sw-':
+            print('Check steering wheel!!')
+            window.perform_long_operation(lambda: print(get_sw_angle(SW_NUM)), "-check-sw-done-")
+        if event == '-init-sw-':
+            window.perform_long_operation(lambda: initialize_sw(SW_NUM), "-init-sw-done-")
+            window['-init-sw-'].update(disabled=True)
+        if event == '-init-sw-done-':
+            window['-init-sw-'].update(disabled=False)
+            print('All good!')
 
         # Audio test
         if event == '-audio-test-':
