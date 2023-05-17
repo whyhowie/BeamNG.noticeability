@@ -22,6 +22,8 @@ BEAMNG_PROCESS_NAME = 'BeamNG.tech.x64'
 BEAMNG_HOME = 'D:/BeamNG/BeamNG.tech.v0.28.1.0'
 BEAMNG_USER = 'D:/BeamNG/BeamNGpy'
 
+# These are just initialized values - to make sure other functions are working
+# Change settings in the run_scenario() function
 bng = BeamNGpy('localhost', 64256, home=BEAMNG_HOME, user=BEAMNG_USER)
 scenario = Scenario('east_coast_usa', 'Example')
 vehicle = Vehicle('ego_vehicle', model='etk800', license='NOTICE')
@@ -317,11 +319,15 @@ PID_DIR = -1
 
 ################ Steering wheel feedback output #####################
 def sw_default_output(device_num=SW_NUM):
-    lsw.play_spring_force(device_num, 0, 20, 80)
+    lsw.play_spring_force(device_num, 0, 20, 20)    
+        # 0: centering offset; 20: saturation force; 20: slope/spring constant
+    lsw.play_damper_force(device_num, 10)
 
 def stop_sw_default_output(device_num=SW_NUM):
     if lsw.is_playing(device_num, lsw.ForceType.SPRING):
         lsw.stop_spring_force(device_num)
+    if lsw.is_playing(device_num, lsw.ForceType.DAMPER):
+        lsw.stop_damper_force(device_num)
 
 
 def sw_feedback_output(device_num=SW_NUM, vehicle_id="ego_vehicle"):
@@ -341,6 +347,7 @@ def sw_feedback_output(device_num=SW_NUM, vehicle_id="ego_vehicle"):
             
             if driving_mode == 'autonomous':
                 stop_sw_default_output(device_num)  # default behavior
+                lsw.play_damper_force(device_num, 10) # add some friction force
 
                 # PID Proportional term
                 sw_error = steering_angle - sw_angle    # find angle difference
@@ -351,7 +358,7 @@ def sw_feedback_output(device_num=SW_NUM, vehicle_id="ego_vehicle"):
 
                 # PID Integral term
                 PID_i = PID_i + (PID_DIR * K_I * sw_error * time_interval)  # update integral
-                PID_i = max(-80, min(PID_i, 80))   # limit the integral term output to +/-80
+                PID_i = max(-15, min(PID_i, 15))   # limit the integral term output to +/-80
 
 
                 # PID Derivative term

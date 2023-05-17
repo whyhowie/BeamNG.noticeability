@@ -25,11 +25,15 @@ class MyMainwindow(QtWidgets.QMainWindow):
         self.stop_button = QtWidgets.QPushButton('stop')
         self.effect_button = QtWidgets.QPushButton('Toggle feedback')
         self.force_button = QtWidgets.QPushButton('Toggle Play Force')
+        self.spring_button = QtWidgets.QPushButton('Toggle Play Spring Force')
+        self.damper_button = QtWidgets.QPushButton('Toggle Play Damper Force')
 
         self.connect_button.clicked.connect(self.connect_to_wheel)
         self.stop_button.clicked.connect(self.stop)
         self.effect_button.clicked.connect(self.toggle_feedback)
         self.force_button.clicked.connect(self.toggle_play_force)
+        self.spring_button.clicked.connect(self.toggle_play_spring)
+        self.damper_button.clicked.connect(self.toggle_play_damper)
 
         layout = QtWidgets.QVBoxLayout()
         widget = QtWidgets.QWidget()
@@ -38,6 +42,8 @@ class MyMainwindow(QtWidgets.QMainWindow):
         layout.addWidget(self.connect_button)
         layout.addWidget(self.effect_button)
         layout.addWidget(self.force_button)
+        layout.addWidget(self.spring_button)
+        layout.addWidget(self.damper_button)
         layout.addWidget(self.stop_button)
         layout.addWidget(self.current_angle)
 
@@ -77,6 +83,18 @@ class MyMainwindow(QtWidgets.QMainWindow):
             lsw.stop_constant_force(DEVICE_NUM)
         else:
             lsw.play_constant_force(DEVICE_NUM, -10)
+
+    def toggle_play_spring(self):
+        if lsw.is_playing(DEVICE_NUM, lsw.ForceType.SPRING):
+            lsw.stop_spring_force(DEVICE_NUM)
+        else:
+            lsw.play_spring_force(DEVICE_NUM, 0, 20, 10)
+
+    def toggle_play_damper(self):
+        if lsw.is_playing(DEVICE_NUM, lsw.ForceType.DAMPER):
+            lsw.stop_damper_force(DEVICE_NUM)
+        else:
+            lsw.play_damper_force(DEVICE_NUM, 20)
 
     def stop(self):
         print('disconnecting')
